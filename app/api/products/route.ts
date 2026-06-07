@@ -1,131 +1,127 @@
 import { NextResponse } from "next/server";
+import { supabase } from "@/lib/supabase";
 
-const SHEET_ID = process.env.GOOGLE_SHEET_ID;
-const SCRIPT_URL = process.env.GOOGLE_APPS_SCRIPT_URL;
-
-// ── CSV helpers ──────────────────────────────────────────────────────────────
-
-function parseCSVRow(line: string): string[] {
-  const result: string[] = [];
-  let current = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i];
-    if (char === '"') {
-      if (inQuotes && line[i + 1] === '"') {
-        current += '"';
-        i++;
-      } else {
-        inQuotes = !inQuotes;
-      }
-    } else if (char === "," && !inQuotes) {
-      result.push(current);
-      current = "";
-    } else {
-      current += char;
-    }
-  }
-  result.push(current);
-  return result;
-}
-
-function parseCSV(text: string): Record<string, string>[] {
-  const lines = text.trim().split("\n");
-  if (lines.length < 2) return [];
-
-  const headers = parseCSVRow(lines[0]).map((h) => h.trim());
-  return lines.slice(1).map((line) => {
-    const values = parseCSVRow(line);
-    return Object.fromEntries(
-      headers.map((h, i) => [h, (values[i] ?? "").trim()])
-    );
-  });
-}
-
-// ── GET — fetch products from Google Sheet ───────────────────────────────────
+// ── GET — fetch all products from Supabase ───────────────────────────────────
 
 export async function GET() {
-  if (!SHEET_ID) {
-    return NextResponse.json(
-      { error: "GOOGLE_SHEET_ID is not configured" },
-      { status: 500 }
-    );
+  const { data, error } = await supabase
+    .from("products")
+    .select("*")
+    .order("name");
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv`;
+  return NextResponse.json(data);
+}
 
+// ── PATCH — decrement stock quantities after invoice generation ──────────────
+
+export async function PATCH(request: Request) {
   try {
-    const res = await fetch(url, {
-      next: { revalidate: 60, tags: ["products"] },
-    });
+    const body = await request.json();
+    const reductions: { id: string; qty: number }[] = body.reductions ?? [];
 
-    if (!res.ok) {
-      return NextResponse.json(
-        {
-          error:
-            "Failed to fetch Google Sheet. Make sure it is shared publicly.",
-        },
-        { status: 502 }
-      );
+    for (const { id, qty } of reductions) {
+      if (!id || qty <= 0) continue;
+
+      const { data: product, error: fetchError } = await supabase
+        .from("products")
+        .select("quantity")
+        .eq("id", id)
+        .single();
+
+      if (fetchError || !product) continue;
+
+      const newQty = Math.max(0, product.quantity - qty);
+      await supabase.from("products").update({ quantity: newQty }).eq("id", id);
     }
 
-    const text = await res.text();
-    const rows = parseCSV(text);
-
-    const products = rows
-      .filter((row) => row.name?.trim())
-      .map((row) => ({
-        id: row.id?.trim() || crypto.randomUUID(),
-        name: row.name.trim(),
-        pricePerItem: parseFloat(row.pricePerItem) || 0,
-        quantity: parseInt(row.quantity) || 0,
-        added_date: row.added_date?.trim() || "",
-        added_by: row.added_by?.trim() || "",
-      }));
-
-    return NextResponse.json(products);
+    return NextResponse.json({ success: true });
   } catch {
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 }
 
-// ── POST — append a new row via Google Apps Script ───────────────────────────
+// ── PUT — update an existing product ─────────────────────────────────────────
+
+export async function PUT(request: Request) {
+  try {
+    const body = await request.json();
+    const { id, name, pricePerItem, quantity, added_by } = body;
+
+    if (!id) {
+      return NextResponse.json({ error: "Missing product id" }, { status: 400 });
+    }
+
+    const { data, error } = await supabase
+      .from("products")
+      .update({ name, pricePerItem, quantity, added_by })
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json(data);
+  } catch {
+    return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
+  }
+}
+
+// ── DELETE — remove a product by id ──────────────────────────────────────────
+
+export async function DELETE(request: Request) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get("id");
+
+    if (!id) {
+      return NextResponse.json({ error: "Missing product id" }, { status: 400 });
+    }
+
+    const { error } = await supabase.from("products").delete().eq("id", id);
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true });
+  } catch {
+    return NextResponse.json({ error: "Invalid request" }, { status: 400 });
+  }
+}
+
+// ── POST — insert a new product into Supabase ────────────────────────────────
 
 export async function POST(request: Request) {
-  if (!SCRIPT_URL) {
-    return NextResponse.json(
-      { error: "GOOGLE_APPS_SCRIPT_URL is not configured" },
-      { status: 500 }
-    );
-  }
-
   try {
     const body = await request.json();
 
-    const res = await fetch(SCRIPT_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      redirect: "follow",
-    });
+    const { data, error } = await supabase
+      .from("products")
+      .insert([
+        {
+          id: body.id,
+          name: body.name,
+          pricePerItem: body.pricePerItem,
+          quantity: body.quantity,
+          added_date: body.added_date,
+          added_by: body.added_by,
+        },
+      ])
+      .select()
+      .single();
 
-    if (!res.ok) {
-      return NextResponse.json(
-        { error: "Failed to write to Google Sheet" },
-        { status: 502 }
-      );
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    const result = await res.json();
-    return NextResponse.json(result);
+    return NextResponse.json(data);
   } catch {
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 }

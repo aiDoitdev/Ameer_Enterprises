@@ -10,10 +10,10 @@ const generateId = () =>
   `item_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 
 const defaultData: EstimateData = {
-  companyName: "",
+  companyName: "Ameer Motor Seat Covers",
   documentType: "ESTIMATION",
-  cellNo: "",
-  date: "",
+  cellNo: "9030623730",
+  date: new Date().toISOString().split("T")[0],
   invoiceNo: "",
   vendorName: "",
   items: [],
@@ -34,19 +34,34 @@ export default function HomePage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loadingProducts, setLoadingProducts] = useState(true);
 
-  useEffect(() => {
-    async function fetchProducts() {
-      try {
-        const res = await fetch("/api/products");
-        if (res.ok) {
-          const rows: Product[] = await res.json();
-          setProducts(rows.sort((a, b) => a.name.localeCompare(b.name)));
-        }
-      } finally {
-        setLoadingProducts(false);
+  const fetchProducts = async () => {
+    try {
+      const res = await fetch("/api/products");
+      if (res.ok) {
+        const rows: Product[] = await res.json();
+        setProducts(rows.sort((a, b) => a.name.localeCompare(b.name)));
       }
+    } finally {
+      setLoadingProducts(false);
     }
+  };
+
+  const fetchNextInvoiceNo = async () => {
+    try {
+      const res = await fetch("/api/invoices/next-number");
+      if (res.ok) {
+        const { nextNumber } = await res.json();
+        setData((prev) => ({ ...prev, invoiceNo: nextNumber }));
+      }
+    } catch {
+      // silently fail — user can type manually
+    }
+  };
+
+  useEffect(() => {
     fetchProducts();
+    fetchNextInvoiceNo();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const set = <K extends keyof EstimateData>(key: K, value: EstimateData[K]) =>
@@ -113,6 +128,7 @@ export default function HomePage() {
   const oldDue = parseFloat(data.oldDue) || 0;
   const received = parseFloat(data.received) || 0;
   const grandTotal = subTotal + oldDue - received;
+  const isNegativeTotal = grandTotal < 0;
 
   return (
     <main className="min-h-screen bg-slate-100 pb-28">
@@ -131,6 +147,25 @@ export default function HomePage() {
             </p>
           </div>
 
+          <Link
+            href="/invoice-history"
+            className="flex items-center gap-1.5 text-sm font-semibold text-purple-600 hover:text-purple-700 active:scale-95 transition-transform shrink-0"
+          >
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+              />
+            </svg>
+            History
+          </Link>
           <Link
             href="/stock"
             className="flex items-center gap-1.5 text-sm font-semibold text-emerald-600 hover:text-emerald-700 active:scale-95 transition-transform shrink-0"
@@ -160,45 +195,28 @@ export default function HomePage() {
           <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">
             Company Info
           </h2>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelCls}>Company Name</label>
-              <input
-                type="text"
-                value={data.companyName}
-                onChange={(e) => set("companyName", e.target.value)}
-                className={inputCls}
-                placeholder="e.g. SSAA"
-              />
-            </div>
-            <div>
-              <label className={labelCls}>Document Type</label>
-              <input
-                type="text"
-                value={data.documentType}
-                onChange={(e) => set("documentType", e.target.value)}
-                className={inputCls}
-                placeholder="e.g. ESTIMATION"
-              />
-            </div>
-          </div>
-        </section>
-
-        {/* Vendor & Contact */}
-        <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
-          <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">
-            Vendor &amp; Contact
-          </h2>
           <div className="space-y-3">
-            <div>
-              <label className={labelCls}>Vendor Name</label>
-              <input
-                type="text"
-                value={data.vendorName}
-                onChange={(e) => set("vendorName", e.target.value)}
-                className={inputCls}
-                placeholder="e.g. Vendor name"
-              />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelCls}>Company Name</label>
+                <input
+                  type="text"
+                  value={data.companyName}
+                  onChange={(e) => set("companyName", e.target.value)}
+                  className={inputCls}
+                  placeholder="e.g. SSAA"
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Document Type</label>
+                <input
+                  type="text"
+                  value={data.documentType}
+                  onChange={(e) => set("documentType", e.target.value)}
+                  className={inputCls}
+                  placeholder="e.g. ESTIMATION"
+                />
+              </div>
             </div>
             <div className="grid grid-cols-3 gap-3">
               <div>
@@ -214,11 +232,10 @@ export default function HomePage() {
               <div>
                 <label className={labelCls}>Date</label>
                 <input
-                  type="text"
+                  type="date"
                   value={data.date}
                   onChange={(e) => set("date", e.target.value)}
                   className={inputCls}
-                  placeholder="DD/MM/YY"
                 />
               </div>
               <div>
@@ -232,6 +249,23 @@ export default function HomePage() {
                 />
               </div>
             </div>
+          </div>
+        </section>
+
+        {/* Vendor & Contact */}
+        <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
+          <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">
+            Vendor &amp; Contact
+          </h2>
+          <div>
+            <label className={labelCls}>Vendor Name</label>
+            <input
+              type="text"
+              value={data.vendorName}
+              onChange={(e) => set("vendorName", e.target.value)}
+              className={inputCls}
+              placeholder="e.g. Vendor name"
+            />
           </div>
         </section>
 
@@ -367,8 +401,8 @@ export default function HomePage() {
                         {loadingProducts ? "Loading…" : "Select an item"}
                       </option>
                       {products.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name}
+                        <option key={p.id} value={p.id} disabled={p.quantity === 0}>
+                          {p.name} {p.quantity === 0 ? "(Out of stock)" : `(Qty: ${p.quantity})`}
                         </option>
                       ))}
                     </select>
@@ -384,7 +418,8 @@ export default function HomePage() {
                         }
                         className={`${inputCls} text-center ${qtyErrors.has(item.id) ? "border-red-400 focus:ring-red-400" : ""}`}
                         placeholder="0"
-                        min="0"
+                        min="1"
+                        step="1"
                       />
                       {qtyErrors.has(item.id) && (
                         <p className="text-xs text-red-500 mt-1 font-medium">
@@ -428,8 +463,8 @@ export default function HomePage() {
                       {loadingProducts ? "Loading…" : "Select an item"}
                     </option>
                     {products.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
+                      <option key={p.id} value={p.id} disabled={p.quantity === 0}>
+                        {p.name} {p.quantity === 0 ? "(Out of stock)" : `(Qty: ${p.quantity})`}
                       </option>
                     ))}
                   </select>
@@ -440,7 +475,8 @@ export default function HomePage() {
                       onChange={(e) => setItem(item.id, "qty", e.target.value)}
                       className={`${inputCls} text-center ${qtyErrors.has(item.id) ? "border-red-400 focus:ring-red-400" : ""}`}
                       placeholder="0"
-                      min="0"
+                      min="1"
+                      step="1"
                     />
                     {qtyErrors.has(item.id) && (
                       <p className="text-xs text-red-500 mt-1 text-center font-medium">
@@ -543,10 +579,21 @@ export default function HomePage() {
               <span className="text-sm font-bold text-gray-900">
                 Grand Total
               </span>
-              <span className="text-lg font-bold text-blue-700">
-                ₹{grandTotal.toLocaleString()}
+              <span className={`text-lg font-bold ${isNegativeTotal ? "text-orange-500" : "text-blue-700"}`}>
+                ₹{Math.max(0, grandTotal).toLocaleString()}
               </span>
             </div>
+
+            {isNegativeTotal && (
+              <div className="bg-orange-50 border border-orange-200 rounded-xl px-3 py-2 flex items-center gap-2">
+                <svg className="w-4 h-4 text-orange-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                </svg>
+                <p className="text-xs text-orange-700 font-medium">
+                  Received exceeds total — grand total shown as ₹0.
+                </p>
+              </div>
+            )}
 
             {grandTotal > 0 && (
               <div className="bg-blue-50 rounded-xl p-3">
@@ -584,6 +631,11 @@ export default function HomePage() {
               Fix quantity errors before previewing
             </p>
           )}
+          {!hasQtyErrors && data.items.length === 0 && (
+            <p className="text-xs text-amber-500 font-medium text-center mb-2">
+              No items added — the estimate will be empty
+            </p>
+          )}
           <button
             onClick={() => setShowPreview(true)}
             disabled={hasQtyErrors}
@@ -615,7 +667,14 @@ export default function HomePage() {
 
       {/* Preview modal */}
       {showPreview && (
-        <PreviewModal data={data} onClose={() => setShowPreview(false)} />
+        <PreviewModal
+          data={data}
+          onClose={() => setShowPreview(false)}
+          onStockReduced={() => {
+            setLoadingProducts(true);
+            fetchProducts();
+          }}
+        />
       )}
     </main>
   );

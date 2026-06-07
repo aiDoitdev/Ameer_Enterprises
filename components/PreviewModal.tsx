@@ -7,15 +7,22 @@ import EstimateDocument from "./EstimateDocument";
 interface Props {
   data: EstimateData;
   onClose: () => void;
+  onStockReduced?: () => void;
 }
 
-export default function PreviewModal({ data, onClose }: Props) {
+export default function PreviewModal({ data, onClose, onStockReduced }: Props) {
   const docRef = useRef<HTMLDivElement>(null);
   const [downloading, setDownloading] = useState(false);
+  const [stockReduced, setStockReduced] = useState(false);
+  const [stockError, setStockError] = useState("");
+  const [downloadError, setDownloadError] = useState("");
+  const [invoiceSaved, setInvoiceSaved] = useState(false);
 
   const handleDownload = async () => {
     if (!docRef.current) return;
     setDownloading(true);
+    setStockError("");
+    setDownloadError("");
     try {
       const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([
         import("html2canvas"),
@@ -55,8 +62,59 @@ export default function PreviewModal({ data, onClose }: Props) {
       }
 
       pdf.save(`estimate-${data.invoiceNo || "document"}.pdf`);
+
+      // Save invoice to history once per modal session
+      if (!invoiceSaved) {
+        const subTotal = data.items.reduce(
+          (s, item) => s + (parseFloat(item.qty) || 0) * (parseFloat(item.price) || 0),
+          0
+        );
+        const oldDue = parseFloat(data.oldDue) || 0;
+        const received = parseFloat(data.received) || 0;
+        await fetch("/api/invoices", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            invoice_no: data.invoiceNo,
+            company_name: data.companyName,
+            document_type: data.documentType,
+            cell_no: data.cellNo,
+            date: data.date,
+            vendor_name: data.vendorName,
+            items: data.items,
+            sub_total: subTotal,
+            old_due: oldDue,
+            received: received,
+            grand_total: subTotal + oldDue - received,
+            footer_text: data.footerText,
+          }),
+        });
+        setInvoiceSaved(true);
+      }
+
+      // Reduce stock quantities once per modal session
+      if (!stockReduced) {
+        const reductions = data.items
+          .filter((item) => item.productId && parseFloat(item.qty) > 0)
+          .map((item) => ({ id: item.productId, qty: parseFloat(item.qty) }));
+
+        if (reductions.length > 0) {
+          const res = await fetch("/api/products", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ reductions }),
+          });
+          if (res.ok) {
+            setStockReduced(true);
+            onStockReduced?.();
+          } else {
+            setStockError("Stock update failed. Please adjust stock manually.");
+          }
+        }
+      }
     } catch (err) {
       console.error("PDF generation failed:", err);
+      setDownloadError("PDF generation failed. Please try again.");
     } finally {
       setDownloading(false);
     }
@@ -65,7 +123,7 @@ export default function PreviewModal({ data, onClose }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-black/70">
       {/* Modal toolbar */}
-      <div className="flex items-center justify-between bg-white px-4 py-3 shadow-md flex-shrink-0">
+      <div className="flex items-center justify-between bg-white px-4 py-3 shadow-md shrink-0">
         <h2 className="text-base font-bold text-gray-900">Estimate Preview</h2>
         <div className="flex items-center gap-2">
           <button
@@ -99,6 +157,30 @@ export default function PreviewModal({ data, onClose }: Props) {
         </div>
       </div>
 
+      {/* Download error banner */}
+      {downloadError && (
+        <div className="bg-red-50 border-b border-red-200 px-4 py-2 text-sm text-red-600 font-medium shrink-0 flex items-center gap-2">
+          <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+          </svg>
+          {downloadError}
+        </div>
+      )}
+
+      {/* Stock error banner */}
+      {stockError && (
+        <div className="bg-red-50 border-b border-red-200 px-4 py-2 text-sm text-red-600 font-medium shrink-0">
+          {stockError}
+        </div>
+      )}
+
+      {/* Stock reduced confirmation */}
+      {stockReduced && (
+        <div className="bg-emerald-50 border-b border-emerald-200 px-4 py-2 text-sm text-emerald-700 font-medium shrink-0">
+          Stock updated successfully.
+        </div>
+      )}
+
       {/* Scrollable preview area */}
       <div className="flex-1 overflow-y-auto overflow-x-auto bg-gray-700 p-4 md:p-8">
         <div className="min-w-[320px] max-w-2xl mx-auto shadow-2xl">
@@ -107,7 +189,7 @@ export default function PreviewModal({ data, onClose }: Props) {
       </div>
 
       {/* Bottom bar on mobile for easy access */}
-      <div className="md:hidden flex-shrink-0 bg-white border-t border-gray-200 px-4 py-3">
+      <div className="md:hidden shrink-0 bg-white border-t border-gray-200 px-4 py-3">
         <button
           onClick={handleDownload}
           disabled={downloading}

@@ -4,6 +4,17 @@ import { forwardRef } from "react";
 import { EstimateData } from "@/types/estimate";
 import { numberToWords } from "@/lib/numberToWords";
 
+function formatDate(dateStr: string): string {
+  if (!dateStr) return "";
+  // Convert YYYY-MM-DD (HTML date input) → DD/MM/YY
+  const parts = dateStr.split("-");
+  if (parts.length === 3 && parts[0].length === 4) {
+    const [year, month, day] = parts;
+    return `${day}/${month}/${year.slice(2)}`;
+  }
+  return dateStr;
+}
+
 interface Props {
   data: EstimateData;
 }
@@ -16,10 +27,12 @@ const row: React.CSSProperties = {
 };
 
 const EstimateDocument = forwardRef<HTMLDivElement, Props>(({ data }, ref) => {
-  const items = data.items.map((item) => ({
-    ...item,
-    amount: (parseFloat(item.qty) || 0) * (parseFloat(item.price) || 0),
-  }));
+  const items = data.items
+    .filter((item) => item.itemName.trim() !== "")
+    .map((item) => ({
+      ...item,
+      amount: (parseFloat(item.qty) || 0) * (parseFloat(item.price) || 0),
+    }));
 
   const subTotal = items.reduce((sum, i) => sum + i.amount, 0);
   const total = subTotal;
@@ -96,8 +109,8 @@ const EstimateDocument = forwardRef<HTMLDivElement, Props>(({ data }, ref) => {
           }}
         >
           <div>CELL NO:{data.cellNo}</div>
-          <div>DATE: {data.date}</div>
-          <div>INVIOCE NO: {data.invoiceNo}</div>
+          <div>DATE: {formatDate(data.date)}</div>
+          <div>INVOICE NO: {data.invoiceNo}</div>
         </div>
       </div>
 
@@ -157,7 +170,7 @@ const EstimateDocument = forwardRef<HTMLDivElement, Props>(({ data }, ref) => {
       >
         <div style={{ ...row, minWidth: "180px" }}>
           <span style={{ fontWeight: "bold" }}>SUB TOTAL</span>
-          <span style={{ fontWeight: "bold" }}>{subTotal}</span>
+          <span style={{ fontWeight: "bold" }}>₹{subTotal.toLocaleString("en-IN")}</span>
         </div>
       </div>
 
@@ -174,21 +187,21 @@ const EstimateDocument = forwardRef<HTMLDivElement, Props>(({ data }, ref) => {
       >
         <div style={{ ...row, minWidth: "180px" }}>
           <span style={{ fontWeight: "bold" }}>TOTAL</span>
-          <span style={{ fontWeight: "bold" }}>{total}</span>
+          <span style={{ fontWeight: "bold" }}>₹{total.toLocaleString("en-IN")}</span>
         </div>
         <div style={{ ...row, minWidth: "180px" }}>
           <span style={{ fontWeight: "bold" }}>OLD DUE</span>
-          <span style={{ fontWeight: "bold" }}>{oldDue > 0 ? oldDue : ""}</span>
+          <span style={{ fontWeight: "bold" }}>{oldDue > 0 ? `₹${oldDue.toLocaleString("en-IN")}` : ""}</span>
         </div>
         <div style={{ ...row, minWidth: "180px" }}>
           <span style={{ fontWeight: "bold" }}>RECEIVED</span>
           <span style={{ fontWeight: "bold" }}>
-            {received > 0 ? received : ""}
+            {received > 0 ? `₹${received.toLocaleString("en-IN")}` : ""}
           </span>
         </div>
         <div style={{ ...row, minWidth: "180px" }}>
           <span style={{ fontWeight: "bold" }}>GRAND TOTAL</span>
-          <span style={{ fontWeight: "bold" }}>{grandTotal}</span>
+          <span style={{ fontWeight: "bold" }}>₹{Math.max(0, grandTotal).toLocaleString("en-IN")}</span>
         </div>
       </div>
 
@@ -205,7 +218,7 @@ const EstimateDocument = forwardRef<HTMLDivElement, Props>(({ data }, ref) => {
       >
         <span>RUPEES:</span>
         <span style={{ textTransform: "uppercase" }}>
-          &nbsp;&nbsp;{numberToWords(grandTotal)}.
+          &nbsp;&nbsp;{numberToWords(Math.max(0, grandTotal))}.
         </span>
       </div>
 
@@ -232,7 +245,7 @@ const EstimateDocument = forwardRef<HTMLDivElement, Props>(({ data }, ref) => {
           fontSize: "13px",
         }}
       >
-        AUTHOURISED SIGNATORY
+        AUTHORISED SIGNATORY
       </div>
     </div>
   );
